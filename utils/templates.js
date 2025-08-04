@@ -37,17 +37,47 @@ export function renderTemplate(templateName, variables = {}) {
   return template;
 }
 
-// Function to render page header for streaming
-export function renderPageHeader(title, articleTitle) {
-  const template = loadTemplate("page-header");
-  return template
-    .replace(/{{TITLE}}/g, title)
-    .replace(/{{ARTICLE_TITLE}}/g, articleTitle);
-}
+// Function to extract linkable pages from infobox data
+export function extractInfoboxLinkedPages(infoboxData) {
+  const linkedPages = new Set();
 
-// Function to render page footer for streaming
-export function renderPageFooter() {
-  return loadTemplate("page-footer");
+  if (!infoboxData || typeof infoboxData !== "object") {
+    return [];
+  }
+
+  Object.values(infoboxData).forEach((value) => {
+    if (!value || typeof value !== "string") {
+      return;
+    }
+
+    // Check if value contains commas (potential list)
+    if (value.includes(",")) {
+      const items = value
+        .split(",")
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
+
+      // If we have multiple items, add each as a linked page
+      if (items.length > 1) {
+        items.forEach((item) => {
+          linkedPages.add(item);
+        });
+        return;
+      }
+    }
+
+    // Check if it looks like a single linkable item (proper noun or specific term)
+    if (
+      /^[A-Z][a-z\s-]+$/.test(value) ||
+      /\b(Empire|Kingdom|Republic|State|Sea|Desert|Ocean|River|Mountain)\b/i.test(
+        value
+      )
+    ) {
+      linkedPages.add(value);
+    }
+  });
+
+  return Array.from(linkedPages);
 }
 
 // Function to convert comma-separated values to links
@@ -99,9 +129,24 @@ export function renderInfobox(title, infoboxData) {
   let infoboxHtml = `<div class="infobox">
     <div class="infobox-title">${title}</div>`;
 
+  // Handle image field first (if present)
+  if (infoboxData.image) {
+    const imageFilename = infoboxData.image;
+    // Extract the filename without extension to use as slug
+    const nameWithoutExt = imageFilename.replace(/\.[^/.]+$/, "");
+    const slug = nameWithoutExt.replace(/\s+/g, "_");
+    // Preserve the original extension from filename
+    const extension = imageFilename.split(".").pop() || "webp";
+
+    infoboxHtml += `
+      <div class="infobox-image">
+        <img src="/images/${slug}.${extension}" alt="${title}" title="${title}">
+      </div>`;
+  }
+
   // Render each field in the infobox
   Object.entries(infoboxData).forEach(([key, value]) => {
-    if (key !== "name" && value) {
+    if (key !== "name" && key !== "image" && value) {
       // Format the key for display (convert underscores to spaces and capitalize)
       const displayKey = key
         .replace(/_/g, " ")

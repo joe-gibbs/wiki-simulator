@@ -450,6 +450,119 @@ body {
   color: #0645ad;
 }
 
+/* Wiki Image Styles */
+.wiki-image {
+  height: auto;
+  border-radius: 3px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  margin: 8px 0;
+  display: block;
+  border: 1px solid #e0e6ed;
+  /* Remove max-width: 100% to allow small images to stay small */
+}
+
+.wiki-image:hover {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  transition: box-shadow 0.2s ease;
+}
+
+/* Lazy loading styles */
+.wiki-image.lazy-load {
+  /* No visual loading indicator */
+}
+
+.wiki-image.loaded {
+  /* Image successfully loaded */
+}
+
+.wiki-image.error {
+  /* Hide failed images */
+  display: none;
+}
+
+/* Wiki Figure with Caption */
+.wiki-figure {
+  display: block;
+  max-width: 100%;
+  clear: both;
+}
+
+.wiki-figure-float {
+  display: block;
+  clear: none;
+  /* Don't set max-width here - let the image width determine size */
+}
+
+.wiki-figure-full {
+  margin: 20px auto;
+  text-align: center;
+  clear: both;
+  max-width: 100%;
+}
+
+.wiki-figure img {
+  display: block;
+  height: auto;
+  /* Ensure image is at least as wide as its caption */
+  min-width: 100%;
+}
+
+.wiki-figure-float img {
+  /* Let the image use its specified width attribute but grow if caption is wider */
+  max-width: 100%;
+  min-width: 100%;
+}
+
+.wiki-caption {
+  font-size: 11px;
+  color: #666;
+  text-align: left;
+  margin-top: 4px;
+  padding: 3px 5px;
+  line-height: 1.2;
+  background: #f8f9fa;
+  border: 1px solid #e0e6ed;
+  border-radius: 2px;
+  word-wrap: break-word;
+  /* Caption should determine minimum width of the figure */
+  white-space: normal;
+  min-width: max-content;
+}
+
+.wiki-figure-full .wiki-caption {
+  text-align: center;
+  max-width: 500px;
+  margin: 8px auto 0;
+}
+
+/* Inline images without captions */
+.wiki-image-inline {
+  display: block;
+  border: 1px solid #e0e6ed;
+  background: #f8f9fa;
+  padding: 2px;
+  /* Don't set max-width here either */
+}
+
+/* Infobox Image Styles */
+.infobox-image {
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+.infobox-image img {
+  width: 100%;
+  max-width: 300px;
+  height: auto;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.infobox-image img:hover {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  transition: box-shadow 0.2s ease;
+}
+
 /* Responsive Table of Contents */
 @media (max-width: 768px) {
   .toc-container {

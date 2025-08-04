@@ -1,6 +1,7 @@
 import { Groq } from "groq-sdk";
 import { marked } from "marked";
 import { titleToWikipediaSlug } from "../utils/slugs.js";
+import { storeImageContext } from "../utils/imageContext.js";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -63,9 +64,217 @@ export async function generateSearchSuggestions(query) {
   }
 }
 
-// Function to process markdown and convert **bold** and [[links]] to wiki links
-function processMarkdownForWikiLinks(markdownContent) {
-  // First convert [[link|display text]] to [display text](/wiki/link)
+// Function to extract linked pages from markdown content
+export function extractLinkedPages(markdownContent) {
+  const linkedPages = new Set();
+
+  // Extract from [[link|display text]]
+  markdownContent.replace(/\[\[([^|\]]+)\|([^\]]+)\]\]/g, (match, link) => {
+    linkedPages.add(link.trim());
+    return match;
+  });
+
+  // Extract from [[link]]
+  markdownContent.replace(/\[\[([^\]]+)\]\]/g, (match, text) => {
+    linkedPages.add(text.trim());
+    return match;
+  });
+
+  // Extract from **text** (bold text that becomes links)
+  markdownContent.replace(/\*\*([^*]+)\*\*/g, (match, text) => {
+    linkedPages.add(text.trim());
+    return match;
+  });
+
+  return Array.from(linkedPages);
+}
+
+// Function to parse image size and aspect ratio from LLM specification
+function parseImageSize(sizeSpec) {
+  const sizeMap = {
+    small: { width: 120, height: "auto", float: "right" },
+    medium: { width: 180, height: "auto", float: "right" },
+    large: { width: 300, height: "auto", float: "none" },
+    portrait: { width: 100, height: "auto", float: "right" },
+  };
+
+  return (
+    sizeMap[sizeSpec?.toLowerCase()] || {
+      width: 150,
+      height: "auto",
+      float: "right",
+    }
+  );
+}
+
+// Function to parse aspect ratio from LLM specification
+function parseAspectRatio(aspectSpec) {
+  const validRatios = {
+    "1:1": "1:1",
+    "16:9": "16:9",
+    "21:9": "21:9",
+    "3:2": "3:2",
+    "2:3": "2:3",
+    "4:5": "4:5",
+    "5:4": "5:4",
+    "3:4": "3:4",
+    "4:3": "4:3",
+    "9:16": "9:16",
+    "9:21": "9:21",
+  };
+
+  return validRatios[aspectSpec] || "4:3";
+}
+
+// Function to process markdown and convert **bold**, [[links]], and [[Image:...]] to appropriate HTML
+function processMarkdownForWikiLinks(
+  markdownContent,
+  articleTitle = "",
+  sectionTitle = ""
+) {
+  // First convert [[Image:filename|size|aspect_ratio|caption]] to HTML figure with caption
+  markdownContent = markdownContent.replace(
+    /\[\[(?:Image|File):([^|\]]+)\|([^|\]]+)\|([^|\]]+)\|([^\]]+)\]\]/g,
+    (match, filename, sizeSpec, aspectRatio, caption) => {
+      // Extract just the filename without extension to use as slug
+      const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
+      const slug = titleToWikipediaSlug(nameWithoutExt);
+      // Preserve the original extension from filename
+      const extension = filename.split(".").pop() || "webp";
+
+      // Parse size and aspect ratio from LLM specification
+      const size = parseImageSize(sizeSpec);
+      const aspectRatioSpec = parseAspectRatio(aspectRatio);
+
+      // Store context for this image
+      storeImageContext(
+        slug,
+        articleTitle,
+        sectionTitle,
+        caption,
+        markdownContent.substring(0, 500)
+      );
+
+      const floatClass =
+        size.float === "none" ? "wiki-figure-full" : "wiki-figure-float";
+      const floatStyle =
+        size.float === "none"
+          ? ""
+          : `float: ${size.float}; margin: 0 0 15px ${
+              size.float === "right" ? "15px" : "0"
+            }; margin-left: ${size.float === "left" ? "0" : "15px"};`;
+
+      return `<figure class="wiki-figure ${floatClass}" style="${floatStyle}" data-aspect-ratio="${aspectRatioSpec}">
+        <img data-src="/images/${slug}.${extension}" 
+             alt="${caption}" 
+             title="${caption}" 
+             class="wiki-image lazy-load" 
+             width="${size.width}" 
+             style="height: ${size.height}; min-width: fit-content;">
+        <figcaption class="wiki-caption">${caption}</figcaption>
+      </figure>`;
+    }
+  );
+
+  // Convert [[Image:filename|size|caption]] (3-part format) to HTML figure with caption
+  markdownContent = markdownContent.replace(
+    /\[\[(?:Image|File):([^|\]]+)\|([^|\]]+)\|([^\]]+)\]\]/g,
+    (match, filename, sizeSpec, caption) => {
+      // Extract just the filename without extension to use as slug
+      const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
+      const slug = titleToWikipediaSlug(nameWithoutExt);
+      // Preserve the original extension from filename
+      const extension = filename.split(".").pop() || "webp";
+
+      // Parse size from LLM specification, default aspect ratio
+      const size = parseImageSize(sizeSpec);
+
+      const floatClass =
+        size.float === "none" ? "wiki-figure-full" : "wiki-figure-float";
+      const floatStyle =
+        size.float === "none"
+          ? ""
+          : `float: ${size.float}; margin: 0 0 15px ${
+              size.float === "right" ? "15px" : "0"
+            }; margin-left: ${size.float === "left" ? "0" : "15px"};`;
+
+      return `<figure class="wiki-figure ${floatClass}" style="${floatStyle}" data-aspect-ratio="4:3">
+        <img src="/images/${slug}.${extension}" 
+             alt="${caption}" 
+             title="${caption}" 
+             class="wiki-image" 
+             width="${size.width}" 
+             style="height: ${size.height}; max-width: 100%;">
+        <figcaption class="wiki-caption">${caption}</figcaption>
+      </figure>`;
+    }
+  );
+
+  // Convert [[Image:filename|caption]] (legacy format) to HTML figure with caption
+  markdownContent = markdownContent.replace(
+    /\[\[(?:Image|File):([^|\]]+)\|([^\]]+)\]\]/g,
+    (match, filename, caption) => {
+      // Extract just the filename without extension to use as slug
+      const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
+      const slug = titleToWikipediaSlug(nameWithoutExt);
+      // Preserve the original extension from filename
+      const extension = filename.split(".").pop() || "webp";
+
+      // Use default medium size for legacy format
+      const size = parseImageSize("medium");
+
+      const floatClass =
+        size.float === "none" ? "wiki-figure-full" : "wiki-figure-float";
+      const floatStyle =
+        size.float === "none"
+          ? ""
+          : `float: ${size.float}; margin: 0 0 15px ${
+              size.float === "right" ? "15px" : "0"
+            }; margin-left: ${size.float === "left" ? "0" : "15px"};`;
+
+      return `<figure class="wiki-figure ${floatClass}" style="${floatStyle}" data-aspect-ratio="4:3">
+        <img src="/images/${slug}.${extension}" 
+             alt="${caption}" 
+             title="${caption}" 
+             class="wiki-image" 
+             width="${size.width}" 
+             style="height: ${size.height}; max-width: 100%;">
+        <figcaption class="wiki-caption">${caption}</figcaption>
+      </figure>`;
+    }
+  );
+
+  // Then convert [[Image:filename]] (without caption) to HTML img tags
+  markdownContent = markdownContent.replace(
+    /\[\[(?:Image|File):([^\]]+)\]\]/g,
+    (match, filename) => {
+      // Extract just the filename without extension to use as slug
+      const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
+      const slug = titleToWikipediaSlug(nameWithoutExt);
+      // Preserve the original extension from filename
+      const extension = filename.split(".").pop() || "webp";
+      const altText = nameWithoutExt.replace(/_/g, " ");
+
+      // Use default medium size for images without size specification
+      const size = parseImageSize("medium");
+
+      const floatStyle =
+        size.float === "none"
+          ? ""
+          : `float: ${size.float}; margin: 0 0 15px ${
+              size.float === "right" ? "15px" : "0"
+            }; margin-left: ${size.float === "left" ? "0" : "15px"};`;
+
+      return `<img data-src="/images/${slug}.${extension}" 
+               alt="${altText}" 
+               title="${altText}" 
+               class="wiki-image wiki-image-inline lazy-load" 
+               width="${size.width}" 
+               style="height: ${size.height}; max-width: 100%; ${floatStyle}">`;
+    }
+  );
+
+  // Convert [[link|display text]] to [display text](/wiki/link)
   markdownContent = markdownContent.replace(
     /\[\[([^|\]]+)\|([^\]]+)\]\]/g,
     (match, link, displayText) => {
@@ -201,6 +410,7 @@ Requirements:
 - Write 2-3 sentences that define and contextualize the topic
 - Bold the main topic: **Topic Name**
 - Link key terms using [[Name]] or [[Target|Display Name]] syntax
+- DO NOT include any images in the opening paragraph - images belong in sections
 - Include essential facts (dates, location, significance)
 - Use formal, academic language
 - Make it comprehensive but concise`;
@@ -213,6 +423,7 @@ Requirements:
 - Assume the concept has already been introduced earlier
 - Use wikipedia style prose, not lists or bullet points
 - Link all proper nouns using [[Name]] or [[Target|Display Name]] syntax
+- Include relevant images using [[Image:topic_name.webp|size|aspect_ratio|caption]] syntax when they enhance understanding
 - Include specific dates, names, and examples
 - NEVER start with the section title
 - Start directly with substantive information
@@ -221,7 +432,69 @@ Requirements:
 - Avoid weasel words
 - Avoid "In conclusion" or other essay-type language
 
+WRITING STRUCTURE REQUIREMENTS:
+- Write in complete paragraphs that are NOT interrupted by images
+- Each paragraph should be a complete thought that flows from start to finish
+- If you include images, place them ONLY at the beginning of a paragraph or between paragraphs
+- NEVER break up a sentence or paragraph with an image
+- Images should be on their own line with a blank line after them
+
+Image Guidelines:
+- Use [[Image:descriptive_name.webp|size|aspect_ratio|Brief caption]] for relevant illustrations
+- Size options: small (120px), medium (180px), large (300px), portrait (100px)
+- Aspect ratio options: 1:1, 16:9, 21:9, 3:2, 2:3, 4:5, 5:4, 3:4, 4:3, 9:16, 9:21
+- Choose appropriate combinations:
+  * Portraits/people: portrait + 2:3 or 3:4 (very small for faces)
+  * Landscapes/buildings: large + 16:9 or 21:9 (full width for architecture)
+  * Square objects: small + 1:1 (compact squares)
+  * Diagrams/charts: medium + 4:3 or 3:2 (readable diagrams)
+  * Vertical structures: small + 9:16 or 2:3 (tall narrow images)
+- Vary sizes significantly - use small for details, large for main subjects
+
+CRITICAL IMAGE PLACEMENT RULES:
+- NEVER place images in the middle of a sentence or paragraph
+- ONLY place images at the very beginning of a paragraph or between paragraphs
+- Images must be on their own line, followed by a blank line before the next paragraph
+- Text should flow in complete, uninterrupted paragraphs with images floating alongside
+
+CORRECT EXAMPLE:
+[[Image:example.webp|small|4:3|Caption here]]
+
+This is a complete paragraph that flows naturally without any interruption. The image floats alongside this text block.
+
+This is another complete paragraph that continues the discussion.
+
+FORBIDDEN - DO NOT DO THIS:
+This is a paragraph and [[Image:bad.webp|small|4:3|Bad placement]] then more text continues.
+
+- Choose descriptive filenames that relate to the content
+
 FORBIDDEN: Do not write phrases like "The history of...", "The development of...", "The characteristics include...", or any reference to the section name.`;
+
+// Static system prompt for content validation (cacheable)
+const CONTENT_VALIDATION_PROMPT = `You are a content moderator for a Wikipedia-style site. Determine if a topic is appropriate for an educational encyclopedia.
+
+Return ONLY "VALID" or "INVALID":
+- VALID: Educational, historical, scientific, cultural, biographical, geographical topics
+- INVALID: Explicit sexual content, graphic violence, hate speech, illegal activities, personal attacks
+
+Be lenient - err on the side of allowing content unless clearly inappropriate.`;
+
+// Static system prompt for slug rewriting (cacheable)
+const SLUG_REWRITING_PROMPT = `You are a Wikipedia title standardizer. Convert user input into proper Wikipedia article titles.
+
+Rules:
+- Use proper capitalization and formatting
+- Convert informal names to formal titles
+- Use standard Wikipedia naming conventions
+- Keep it concise and encyclopedic
+- Return ONLY the corrected title, nothing else
+
+Examples:
+"us congress" → "United States Congress"
+"world war 2" → "World War II"
+"covid" → "COVID-19"
+"apple company" → "Apple Inc."`;
 
 // Static system prompt for infobox generation (cacheable)
 const INFOBOX_SYSTEM_PROMPT = `You are a Wikipedia infobox data generator. Return ONLY valid JSON, no explanations or other text.
@@ -234,6 +507,7 @@ Requirements:
 - Include dates, locations, numbers, key figures, classifications
 - Format dates as readable text (e.g., "March 15, 1995", "1969-present")
 - Keep values concise but informative
+- Include an "image" field with filename when appropriate: "topic_name.webp"
 - Use proper JSON syntax with double quotes
 - Do not include trailing commas
 - Do not add any text before or after the JSON
@@ -241,6 +515,7 @@ Requirements:
 Example format:
 {
   "name": "Example Name",
+  "image": "example_name.webp",
   "type": "Historical Empire",
   "founded": "395 AD",
   "capital": "Constantinople",
@@ -394,16 +669,24 @@ export async function generatePageContent(topic) {
 
     // Add See also section
     markdownContent += "## See also\n\n";
-    markdownContent += `* [${topic} (disambiguation)](/wiki/${titleToWikipediaSlug(
-      topic
-    )}_disambiguation)\n`;
-    markdownContent += "* [Related topics](/wiki/Related_Topics)\n";
+    markdownContent += `* [[${topic} (disambiguation)]]\n`;
+    markdownContent += "* [[Related topics]]\n";
+
+    // Extract linked pages before processing markdown (for valid page cache)
+    const linkedPages = extractLinkedPages(markdownContent);
+    if (linkedPages.length > 0) {
+      console.log(`Found ${linkedPages.length} linked pages:`, linkedPages);
+    }
 
     // Generate table of contents from markdown headers
     const tableOfContents = generateTableOfContents(markdownContent);
 
     // Process markdown to convert **bold** to wiki links
-    markdownContent = processMarkdownForWikiLinks(markdownContent);
+    markdownContent = processMarkdownForWikiLinks(
+      markdownContent,
+      title,
+      "Main Content"
+    );
 
     // Convert markdown to HTML
     let htmlContent = marked.parse(markdownContent);
@@ -423,7 +706,10 @@ export async function generatePageContent(topic) {
     }
 
     console.log("Article generation completed successfully");
-    return htmlContent;
+    return {
+      content: htmlContent,
+      linkedPages: linkedPages,
+    };
   } catch (error) {
     console.error("Error in structured article generation:", error);
     throw error;
@@ -501,6 +787,80 @@ export async function generateInfobox(topic) {
     return JSON.parse(response);
   } catch (error) {
     console.error("Error generating infobox:", error);
+    throw error;
+  }
+}
+
+// Function to validate content appropriateness using Groq
+export async function validateContent(topic) {
+  try {
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: CONTENT_VALIDATION_PROMPT,
+        },
+        {
+          role: "user",
+          content: `Topic: "${topic}"`,
+        },
+      ],
+      model: "llama-3.1-8b-instant",
+      temperature: 0.1,
+      max_completion_tokens: 10,
+      top_p: 0.9,
+      stream: false,
+    });
+
+    const response = chatCompletion.choices[0]?.message?.content?.trim() || "";
+
+    if (!response) {
+      throw new Error("LLM returned empty response for content validation");
+    }
+
+    return response.toUpperCase() === "VALID";
+  } catch (error) {
+    console.error("Error validating content:", error);
+    throw error;
+  }
+}
+
+// Function to rewrite slug to proper Wikipedia title using Groq
+export async function rewriteSlugToTitle(slug) {
+  try {
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: SLUG_REWRITING_PROMPT,
+        },
+        {
+          role: "user",
+          content: `Convert this to a proper Wikipedia article title: ${slug.replace(
+            /_/g,
+            " "
+          )}`,
+        },
+      ],
+      model: "llama-3.1-8b-instant",
+      temperature: 0.2,
+      max_completion_tokens: 50,
+      top_p: 0.9,
+      stream: false,
+    });
+
+    const response = chatCompletion.choices[0]?.message?.content?.trim() || "";
+
+    // Remove quotes if LLM added them
+    const cleanResponse = response.replace(/^["']|["']$/g, "");
+
+    if (!cleanResponse) {
+      throw new Error("LLM returned empty response for slug rewriting");
+    }
+
+    return cleanResponse;
+  } catch (error) {
+    console.error("Error rewriting slug:", error);
     throw error;
   }
 }
