@@ -70,19 +70,22 @@ app.get("/api/search", async (req, res) => {
 app.get("/wiki/:page", async (req, res) => {
   try {
     const { page } = req.params;
-    const cacheKey = `wiki_${page}`;
+
+    // Decode URL first
+    const decodedPage = decodeURIComponent(page);
+    const cacheKey = `wiki_${decodedPage}`;
 
     // Check file cache first
     if (isCached(cacheKey)) {
       const cachedPage = getCache(cacheKey);
       if (cachedPage) {
-        console.log(`Serving cached page: ${page}`);
+        console.log(`Serving cached page: ${decodedPage}`);
         return res.send(cachedPage);
       }
     }
 
     // Convert Wikipedia slug back to readable title
-    const title = wikipediaSlugToTitle(page);
+    const title = wikipediaSlugToTitle(decodedPage);
 
     console.log(`Generating new page: ${title}`);
 

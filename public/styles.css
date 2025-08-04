@@ -167,7 +167,8 @@ body {
 .infobox {
   float: right;
   clear: right;
-  width: 22em;
+  width: 300px;
+  max-width: 300px;
   margin: 0 0 1em 1em;
   padding: 0;
   border: 1px solid #a2a9b1;
@@ -176,6 +177,7 @@ body {
   color: #202122;
   font-size: 88%;
   line-height: 1.5;
+  table-layout: fixed;
 }
 
 .infobox-title {
@@ -205,6 +207,8 @@ body {
   background-color: #f8f9fa;
   border-right: 1px solid #eaecf0;
   width: 35%;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 .infobox-data {
@@ -213,6 +217,25 @@ body {
   vertical-align: top;
   background-color: #ffffff;
   width: 65%;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.infobox-data .comma-list {
+  display: inline;
+  line-height: 1.4;
+}
+
+.infobox-data .comma-item {
+  display: inline-block;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.infobox-data .comma-list a {
+  display: inline;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 .infobox-data a {
@@ -233,7 +256,20 @@ body {
   .infobox {
     float: none;
     width: 100%;
+    max-width: none;
     margin: 0 0 1em 0;
+  }
+
+  .infobox-label,
+  .infobox-data {
+    font-size: 90%;
+  }
+}
+
+@media (max-width: 480px) {
+  .infobox {
+    width: 280px;
+    max-width: 280px;
   }
 }
 
@@ -319,6 +355,111 @@ body {
 
 .footer a:hover {
   text-decoration: underline;
+}
+
+/* Table of Contents */
+.toc-container {
+  border: 1px solid #a2a9b1;
+  background-color: #f8f9fa;
+  padding: 0;
+  margin: 16px 0 24px 0;
+  display: inline-block;
+  min-width: 200px;
+  max-width: 100%;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.toc-header {
+  background-color: #eaecf0;
+  border-bottom: 1px solid #a2a9b1;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: normal;
+}
+
+.toc-icon {
+  font-size: 16px;
+  color: #54595d;
+  font-weight: bold;
+}
+
+.toc-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: bold;
+  color: #000;
+  border: none;
+  padding: 0;
+  flex: 1;
+}
+
+.toc-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: #54595d;
+  padding: 2px 4px;
+  line-height: 1;
+}
+
+.toc-toggle:hover {
+  background-color: #c8ccd1;
+}
+
+.toc-content {
+  padding: 8px 12px 12px 12px;
+}
+
+.toc-item {
+  margin: 0;
+  padding: 0;
+  line-height: 1.6;
+}
+
+.toc-item a {
+  color: #0645ad;
+  text-decoration: none;
+  display: inline-block;
+  padding: 2px 0;
+}
+
+.toc-item a:hover {
+  text-decoration: underline;
+}
+
+.toc-item a:visited {
+  color: #0b0080;
+}
+
+.toc-level-2 {
+  margin: 2px 0;
+  font-weight: normal;
+}
+
+.toc-level-3 {
+  margin: 1px 0;
+  margin-left: 20px;
+  font-size: 13px;
+}
+
+.toc-level-3 a {
+  color: #0645ad;
+}
+
+/* Responsive Table of Contents */
+@media (max-width: 768px) {
+  .toc-container {
+    width: 100%;
+    margin: 16px 0 20px 0;
+  }
+
+  .toc-level-3 {
+    margin-left: 16px;
+  }
 }
 
 /* Responsive */

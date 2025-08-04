@@ -50,6 +50,46 @@ export function renderPageFooter() {
   return loadTemplate("page-footer");
 }
 
+// Function to convert comma-separated values to links
+function formatInfoboxValue(value) {
+  if (!value || typeof value !== "string") {
+    return value;
+  }
+
+  // Check if value contains commas (potential list)
+  if (value.includes(",")) {
+    const items = value
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+
+    // If we have multiple items, convert each to a link
+    if (items.length > 1) {
+      const links = items.map((item, index) => {
+        // Convert item to slug format for wiki links
+        const slug = item.replace(/\s+/g, "_");
+        const comma = index < items.length - 1 ? ", " : "";
+        return `<span class="comma-item"><a href="/wiki/${slug}">${item}</a>${comma}</span>`;
+      });
+
+      return `<span class="comma-list">${links.join("")}</span>`;
+    }
+  }
+
+  // Check if it looks like a single linkable item (proper noun or specific term)
+  if (
+    /^[A-Z][a-z\s-]+$/.test(value) ||
+    /\b(Empire|Kingdom|Republic|State|Sea|Desert|Ocean|River|Mountain)\b/i.test(
+      value
+    )
+  ) {
+    const slug = value.replace(/\s+/g, "_");
+    return `<a href="/wiki/${slug}">${value}</a>`;
+  }
+
+  return value;
+}
+
 // Function to render infobox HTML from JSON data
 export function renderInfobox(title, infoboxData) {
   if (!infoboxData || Object.keys(infoboxData).length === 0) {
@@ -67,10 +107,13 @@ export function renderInfobox(title, infoboxData) {
         .replace(/_/g, " ")
         .replace(/\b\w/g, (l) => l.toUpperCase());
 
+      // Format the value (convert lists to links where appropriate)
+      const formattedValue = formatInfoboxValue(value);
+
       infoboxHtml += `
         <div class="infobox-row">
           <div class="infobox-label">${displayKey}</div>
-          <div class="infobox-data">${value}</div>
+          <div class="infobox-data">${formattedValue}</div>
         </div>`;
     }
   });

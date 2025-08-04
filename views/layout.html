@@ -73,7 +73,7 @@
         if (e.key === "Enter") {
           const query = this.value.trim();
           if (query) {
-            const slug = query.replace(/\\s+/g, "_").replace(/[^\\w_]/g, "");
+            const slug = query.replace(/\\s+/g, "_");
             location.href = "/wiki/" + slug;
           }
         }
@@ -87,6 +87,47 @@
         ) {
           suggestions.style.display = "none";
         }
+      });
+
+      // Table of Contents toggle functionality
+      document.addEventListener("DOMContentLoaded", function () {
+        const tocToggle = document.querySelector(".toc-toggle");
+        const tocContent = document.querySelector(".toc-content");
+
+        if (tocToggle && tocContent) {
+          let isCollapsed = false;
+
+          tocToggle.addEventListener("click", function () {
+            if (isCollapsed) {
+              tocContent.style.display = "block";
+              tocToggle.textContent = "⌄";
+              isCollapsed = false;
+            } else {
+              tocContent.style.display = "none";
+              tocToggle.textContent = "⌃";
+              isCollapsed = true;
+            }
+          });
+        }
+
+        // Smooth scrolling for table of contents links
+        document.querySelectorAll(".toc-item a").forEach((anchor) => {
+          anchor.addEventListener("click", function (e) {
+            e.preventDefault();
+            const targetId = this.getAttribute("href").substring(1);
+            const targetElement = document.getElementById(targetId);
+
+            if (targetElement) {
+              targetElement.scrollIntoView({
+                behavior: "smooth",
+                block: "start",
+              });
+
+              // Update the URL hash
+              history.pushState(null, null, "#" + targetId);
+            }
+          });
+        });
       });
     </script>
   </body>

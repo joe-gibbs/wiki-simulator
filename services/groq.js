@@ -17,15 +17,13 @@ marked.setOptions({
 });
 
 // Static system prompt for search suggestions (cacheable)
-const SEARCH_SYSTEM_PROMPT = `You are a Wikipedia search assistant. When given a search query, suggest 5 related topics that would make good Wikipedia-style articles.
+const SEARCH_SYSTEM_PROMPT = `Suggest 5 Wikipedia article topics related to the search query.
 
-REQUIREMENTS:
-- Return only topic titles, one per line
-- No numbering, bullet points, or formatting
-- Focus on educational, informative topics
-- Include the exact search term if it's a valid topic
-- Suggest related and broader/narrower concepts
-- Use proper capitalization for topic names`;
+Return only topic titles, one per line:
+- No numbering or formatting
+- Include the search term if valid
+- Suggest related concepts
+- Use proper capitalization`;
 
 // Function to generate search suggestions using Groq
 export async function generateSearchSuggestions(query) {
@@ -65,116 +63,371 @@ export async function generateSearchSuggestions(query) {
   }
 }
 
-// Function to process markdown and convert **bold** to wiki links
+// Function to process markdown and convert **bold** and [[links]] to wiki links
 function processMarkdownForWikiLinks(markdownContent) {
-  // Convert **text** to [text](/wiki/Text_With_Underscores)
+  // First convert [[link|display text]] to [display text](/wiki/link)
+  markdownContent = markdownContent.replace(
+    /\[\[([^|\]]+)\|([^\]]+)\]\]/g,
+    (match, link, displayText) => {
+      const slug = titleToWikipediaSlug(link);
+      return `[${displayText}](/wiki/${slug})`;
+    }
+  );
+
+  // Then convert [[link]] to [link](/wiki/link)
+  markdownContent = markdownContent.replace(
+    /\[\[([^\]]+)\]\]/g,
+    (match, text) => {
+      const slug = titleToWikipediaSlug(text);
+      return `[${text}](/wiki/${slug})`;
+    }
+  );
+
+  // Finally convert **text** to [text](/wiki/Text_With_Underscores)
   return markdownContent.replace(/\*\*([^*]+)\*\*/g, (match, text) => {
     const slug = titleToWikipediaSlug(text);
     return `[${text}](/wiki/${slug})`;
   });
 }
 
-// Static system prompt for Wikipedia article generation (cacheable)
-const WIKIPEDIA_SYSTEM_PROMPT = `You are a professional Wikipedia editor writing comprehensive, encyclopedic articles in the exact style of Wikipedia. You must follow these exact requirements:
+// Function to generate table of contents from markdown headers
+function generateTableOfContents(markdownContent) {
+  const lines = markdownContent.split("\n");
+  const tocItems = [];
+  let tocCounter = 1;
 
-WRITING STYLE:
-- Write in encyclopedic, neutral tone with formal, academic language
-- Start with a clear definition paragraph that contextualizes the topic (no heading)
-- Write in flowing narrative prose, NOT lists or bullet points
-- Use detailed, factual content with specific examples, dates, names, statistics, and scholarly context
-- Write substantial paragraphs (5-8 sentences each) that develop ideas thoroughly
-- Include specific details like founding dates, key figures, technical specifications, historical context
-- Connect ideas between paragraphs with smooth transitions
-- Cite specific examples, case studies, and real-world applications within the narrative
+  for (const line of lines) {
+    // Match ## headers (main sections)
+    const h2Match = line.match(/^## (.+)$/);
+    if (h2Match) {
+      const title = h2Match[1].trim();
+      const id = `toc-${tocCounter++}`;
+      tocItems.push({
+        level: 2,
+        title: title,
+        id: id,
+        children: [],
+      });
+      continue;
+    }
 
-CONTENT STRUCTURE:
-Write comprehensive sections with descriptive prose. Choose from these section types based on topic relevance:
-- Opening definition paragraph establishing context and significance (no heading)
-- ## History / ## Background / ## Origins - chronological development with key events and figures
-- ## Description / ## Characteristics / ## Nature - detailed explanation of fundamental properties
-- ## Types / ## Classifications / ## Categories - different varieties explained in prose with examples
-- ## Methodology / ## Process / ## Implementation - how it works or is applied, with specific procedures
-- ## Applications / ## Uses / ## Role - real-world usage with concrete examples and case studies
-- ## Development / ## Research / ## Current status - ongoing work, recent advances, scholarly activity
-- ## Impact / ## Significance / ## Influence - effects on society, field, or related areas
-- ## Reception / ## Criticism / ## Debates - scholarly discourse, different perspectives, controversies
-- ## Future directions / ## Prospects - anticipated developments and trends
+    // Match ### headers (subsections)
+    const h3Match = line.match(/^### (.+)$/);
+    if (h3Match) {
+      const title = h3Match[1].trim();
+      const id = `toc-${tocCounter++}`;
+      const subsection = {
+        level: 3,
+        title: title,
+        id: id,
+      };
 
-PROSE REQUIREMENTS:
-- Write exclusively in paragraph form - NO bullet points, numbered lists, or simple enumerations
-- Instead of lists, write: "Several key characteristics define this concept, including..." then explain each in flowing sentences
-- Embed examples naturally within explanatory text rather than listing them separately
-- Use transitional phrases to connect ideas: "Furthermore," "Additionally," "In contrast," "Subsequently"
-- Develop each point with supporting details, explanations, and context
-- Integrate multiple related concepts within single, well-developed paragraphs
+      // Add to the last main section if it exists
+      if (tocItems.length > 0) {
+        tocItems[tocItems.length - 1].children.push(subsection);
+      }
+    }
+  }
 
-FORMAT REQUIREMENTS:
-- Use Markdown syntax throughout
-- NO main title (# heading) - article title is added separately
-- Start immediately with definition paragraph
-- Include 15-25 internal links: [Related Topic](/wiki/related-topic)
-- Use **bold** for first mention of article title and key terms (auto-converted to links)
-- Use *italics* for emphasis, foreign terms, and publication titles
-- Write 1000-1500 words minimum
-- Include multiple substantial sections with ## headings
-- Include subsections with ### headings where topic complexity warrants it
-- End with a "See also" section containing relevant wiki links
+  // Generate HTML for table of contents
+  if (tocItems.length === 0) return "";
 
-CRITICAL: Avoid simple lists at all costs. Write comprehensive, flowing prose that thoroughly explains concepts in full sentences and well-developed paragraphs, exactly like genuine Wikipedia articles.`;
+  let tocHtml = `
+    <div class="toc-container">
+      <div class="toc-header">
+        <span class="toc-icon">≡</span>
+        <h2>Contents</h2>
+        <button class="toc-toggle">⌄</button>
+      </div>
+      <div class="toc-content">
+  `;
+
+  tocItems.forEach((item, index) => {
+    const number = index + 1;
+    tocHtml += `        <div class="toc-item toc-level-2">
+          <a href="#${item.id}">${number} ${item.title}</a>
+        </div>\n`;
+
+    // Add subsections
+    item.children.forEach((child, childIndex) => {
+      const subNumber = `${number}.${childIndex + 1}`;
+      tocHtml += `        <div class="toc-item toc-level-3">
+          <a href="#${child.id}">${subNumber} ${child.title}</a>
+        </div>\n`;
+    });
+  });
+
+  tocHtml += `      </div>
+    </div>\n`;
+
+  return tocHtml;
+}
+
+// Function to add IDs to headers in HTML for table of contents linking
+function addHeaderIds(htmlContent) {
+  let tocCounter = 1;
+
+  // Add IDs to h2 elements
+  htmlContent = htmlContent.replace(/<h2>/g, () => {
+    return `<h2 id="toc-${tocCounter++}">`;
+  });
+
+  // Add IDs to h3 elements
+  htmlContent = htmlContent.replace(/<h3>/g, () => {
+    return `<h3 id="toc-${tocCounter++}">`;
+  });
+
+  return htmlContent;
+}
+
+// Static system prompt for article outline generation (cacheable)
+const OUTLINE_SYSTEM_PROMPT = `Generate a Wikipedia article outline in JSON format.
+
+Return ONLY valid JSON:
+{
+  "summary": "Brief factual summary for planning purposes",
+  "sections": [
+    {"title": "History", "description": "Historical background"},
+    {"title": "Description", "description": "Key characteristics"}
+  ]
+}
+
+Choose 4-6 relevant sections from: History, Description, Characteristics, Types, Applications, Development, Impact, Reception, Legacy.`;
+
+// Static system prompt for article opening generation (cacheable)
+const OPENING_SYSTEM_PROMPT = `Write a Wikipedia opening paragraph in neutral, encyclopedic tone.
+
+Requirements:
+- Write 2-3 sentences that define and contextualize the topic
+- Bold the main topic: **Topic Name**
+- Link key terms using [[Name]] or [[Target|Display Name]] syntax
+- Include essential facts (dates, location, significance)
+- Use formal, academic language
+- Make it comprehensive but concise`;
+
+// Static system prompt for individual section generation (cacheable)
+const SECTION_SYSTEM_PROMPT = `Write a Wikipedia section in neutral, encyclopedic tone.
+
+Requirements:
+- 200-400 words of factual, detailed content
+- Assume the concept has already been introduced earlier
+- Use wikipedia style prose, not lists or bullet points
+- Link all proper nouns using [[Name]] or [[Target|Display Name]] syntax
+- Include specific dates, names, and examples
+- NEVER start with the section title
+- Start directly with substantive information
+- Avoid promotional language like "offers," "provides," "ideal," "perfect"
+- Use academic language: "contains," "demonstrates," "comprises"
+- Avoid weasel words
+- Avoid "In conclusion" or other essay-type language
+
+FORBIDDEN: Do not write phrases like "The history of...", "The development of...", "The characteristics include...", or any reference to the section name.`;
 
 // Static system prompt for infobox generation (cacheable)
-const INFOBOX_SYSTEM_PROMPT = `You are a Wikipedia infobox specialist. Generate structured infobox data in JSON format for Wikipedia articles.
+const INFOBOX_SYSTEM_PROMPT = `You are a Wikipedia infobox data generator. Return ONLY valid JSON, no explanations or other text.
 
-REQUIREMENTS:
-- Return ONLY valid JSON, no markdown or explanations
-- Include 8-15 key facts relevant to the topic
-- Use appropriate field names for the topic type
+CRITICAL: Your response must contain ONLY a single JSON object, nothing else.
+
+Requirements:
+- Include 8-12 key facts relevant to the topic
+- Use appropriate field names (name, type, founded, location, capital, area, population, etc.)
 - Include dates, locations, numbers, key figures, classifications
 - Format dates as readable text (e.g., "March 15, 1995", "1969-present")
 - Keep values concise but informative
-- Include both factual data and contextual information
+- Use proper JSON syntax with double quotes
+- Do not include trailing commas
+- Do not add any text before or after the JSON
 
-COMMON INFOBOX FIELDS BY TYPE:
-Person: name, born, died, nationality, occupation, education, known_for, awards
-Place: name, country, region, population, area, founded, coordinates
-Technology: name, type, developer, first_release, latest_release, programming_language, license
-Organization: name, type, founded, founder, headquarters, industry, employees, revenue
-Concept: name, field, first_described, key_figures, applications, related_concepts
+Example format:
+{
+  "name": "Example Name",
+  "type": "Historical Empire",
+  "founded": "395 AD",
+  "capital": "Constantinople",
+  "area": "1,400,000 km²",
+  "population": "12 million (peak)"
+}`;
 
-Return as JSON object with field-value pairs.`;
+// Function to generate article outline using Groq
+async function generateArticleOutline(topic) {
+  try {
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: OUTLINE_SYSTEM_PROMPT,
+        },
+        {
+          role: "user",
+          content: `Generate an article outline for: "${topic}"`,
+        },
+      ],
+      model: "llama-3.1-8b-instant",
+      temperature: 0.3,
+      max_completion_tokens: 1024,
+      top_p: 0.9,
+      stream: false,
+    });
 
-// Function to generate page content using Groq
+    let response = chatCompletion.choices[0]?.message?.content || "{}";
+    response = response.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+
+    // Clean up response - remove any markdown code blocks
+    response = response
+      .replace(/```json\s*/g, "")
+      .replace(/```\s*/g, "")
+      .trim();
+
+    return JSON.parse(response);
+  } catch (error) {
+    console.error("Error generating outline:", error);
+    throw error;
+  }
+}
+
+// Function to generate opening paragraph using Groq
+async function generateOpeningParagraph(topic, outline) {
+  try {
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: OPENING_SYSTEM_PROMPT,
+        },
+        {
+          role: "user",
+          content: `Topic: "${topic}"
+Context: ${outline.summary}
+
+Write a comprehensive Wikipedia opening paragraph that defines and contextualizes this topic.`,
+        },
+      ],
+      model: "llama-3.1-8b-instant",
+      temperature: 0.5,
+      max_completion_tokens: 512,
+      top_p: 0.9,
+      stream: false,
+    });
+
+    let content = chatCompletion.choices[0]?.message?.content || "";
+    content = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+
+    return content;
+  } catch (error) {
+    console.error("Error generating opening paragraph:", error);
+    throw error;
+  }
+}
+
+// Function to generate individual section content using Groq
+async function generateSectionContent(topic, sectionTitle, sectionDescription) {
+  try {
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: SECTION_SYSTEM_PROMPT,
+        },
+        {
+          role: "user",
+          content: `Topic: "${topic}"
+Section: "${sectionTitle}"
+Section focus: ${sectionDescription}
+
+Write the content for this section. Remember to write 200-400 words of detailed, encyclopedic prose with extensive linking.`,
+        },
+      ],
+      model: "llama-3.1-8b-instant",
+      temperature: 0.6,
+      max_completion_tokens: 2048,
+      top_p: 0.95,
+      stream: false,
+    });
+
+    let content = chatCompletion.choices[0]?.message?.content || "";
+    content = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+
+    return content;
+  } catch (error) {
+    console.error(`Error generating section "${sectionTitle}":`, error);
+    throw error;
+  }
+}
+
+// Function to generate page content using structured approach
 export async function generatePageContent(topic) {
-  const chatCompletion = await groq.chat.completions.create({
-    messages: [
-      {
-        role: "system",
-        content: WIKIPEDIA_SYSTEM_PROMPT,
-      },
-      {
-        role: "user",
-        content: `Write a comprehensive Wikipedia article about "${topic}".`,
-      },
-    ],
-    model: "llama-3.1-8b-instant",
-    temperature: 0.6,
-    max_completion_tokens: 4096,
-    top_p: 0.95,
-    stream: false,
-  });
+  try {
+    console.log(`Generating structured article for: ${topic}`);
 
-  let markdownContent = chatCompletion.choices[0]?.message?.content || "";
+    // Step 1: Generate outline and infobox in parallel
+    console.log("Step 1: Generating outline and infobox...");
+    const [outline, infoboxData] = await Promise.all([
+      generateArticleOutline(topic),
+      generateInfobox(topic),
+    ]);
 
-  // Remove <think></think> tokens from the response
-  markdownContent = markdownContent
-    .replace(/<think>[\s\S]*?<\/think>/gi, "")
-    .trim();
+    console.log(`Generated outline with ${outline.sections.length} sections`);
 
-  // Process markdown to convert **bold** to wiki links
-  markdownContent = processMarkdownForWikiLinks(markdownContent);
+    // Step 2: Generate opening paragraph and all sections in parallel
+    console.log("Step 2: Generating opening and all sections in parallel...");
+    const sectionPromises = outline.sections.map((section) =>
+      generateSectionContent(topic, section.title, section.description)
+    );
 
-  // Convert markdown to HTML
-  return marked.parse(markdownContent);
+    const [openingParagraph, ...sectionContents] = await Promise.all([
+      generateOpeningParagraph(topic, outline),
+      ...sectionPromises,
+    ]);
+    console.log("Opening and all sections generated successfully");
+
+    // Step 3: Assemble the complete article
+    console.log("Step 3: Assembling article...");
+
+    // Start with the generated opening paragraph
+    let markdownContent = openingParagraph + "\n\n";
+
+    // Add each section with its content
+    outline.sections.forEach((section, index) => {
+      markdownContent += `## ${section.title}\n\n`;
+      markdownContent += sectionContents[index] + "\n\n";
+    });
+
+    // Add See also section
+    markdownContent += "## See also\n\n";
+    markdownContent += `* [${topic} (disambiguation)](/wiki/${titleToWikipediaSlug(
+      topic
+    )}_disambiguation)\n`;
+    markdownContent += "* [Related topics](/wiki/Related_Topics)\n";
+
+    // Generate table of contents from markdown headers
+    const tableOfContents = generateTableOfContents(markdownContent);
+
+    // Process markdown to convert **bold** to wiki links
+    markdownContent = processMarkdownForWikiLinks(markdownContent);
+
+    // Convert markdown to HTML
+    let htmlContent = marked.parse(markdownContent);
+
+    // Add IDs to headers for table of contents linking
+    htmlContent = addHeaderIds(htmlContent);
+
+    // Insert table of contents after the first paragraph (opening definition)
+    if (tableOfContents) {
+      const firstParagraphEnd = htmlContent.indexOf("</p>");
+      if (firstParagraphEnd !== -1) {
+        const beforeFirstP = htmlContent.substring(0, firstParagraphEnd + 4);
+        const afterFirstP = htmlContent.substring(firstParagraphEnd + 4);
+        htmlContent =
+          beforeFirstP + "\n" + tableOfContents + "\n" + afterFirstP;
+      }
+    }
+
+    console.log("Article generation completed successfully");
+    return htmlContent;
+  } catch (error) {
+    console.error("Error in structured article generation:", error);
+    throw error;
+  }
 }
 
 // Function to generate infobox data using Groq
@@ -192,10 +445,11 @@ export async function generateInfobox(topic) {
         },
       ],
       model: "llama-3.1-8b-instant",
-      temperature: 0.3,
-      max_completion_tokens: 800,
-      top_p: 0.9,
+      temperature: 0.2,
+      max_completion_tokens: 600,
+      top_p: 0.8,
       stream: false,
+      stop: ["\n\n", "```", "Note:", "Explanation:"],
     });
 
     let response = chatCompletion.choices[0]?.message?.content || "{}";
@@ -203,10 +457,26 @@ export async function generateInfobox(topic) {
     // Remove <think></think> tokens from the response
     response = response.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
 
-    // Clean up response - remove any markdown code blocks
+    // Clean up response - remove any markdown code blocks and extra text
     response = response
       .replace(/```json\s*/g, "")
       .replace(/```\s*/g, "")
+      .trim();
+
+    // Extract just the JSON object - find the first { and last }
+    const firstBrace = response.indexOf("{");
+    const lastBrace = response.lastIndexOf("}");
+
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      response = response.substring(firstBrace, lastBrace + 1);
+    }
+
+    // Additional cleanup for common issues
+    response = response
+      .replace(/,\s*}/g, "}") // Remove trailing commas
+      .replace(/,\s*,/g, ",") // Remove double commas
+      .replace(/^\s*{\s*/, "{") // Clean opening
+      .replace(/\s*}\s*$/, "}") // Clean closing
       .trim();
 
     // Ensure the JSON is properly closed if it was truncated
@@ -217,41 +487,20 @@ export async function generateInfobox(topic) {
 
       if (lastCommaIndex > lastCloseBraceIndex) {
         // Remove incomplete last entry and close JSON
-        response = response.substring(0, lastCommaIndex) + "\n}";
+        response = response.substring(0, lastCommaIndex) + "}";
       } else if (!response.endsWith("}")) {
-        response += "\n}";
+        response += "}";
       }
     }
 
-    try {
-      const infoboxData = JSON.parse(response);
-      return infoboxData;
-    } catch (parseError) {
-      console.error("Error parsing infobox JSON:", parseError);
-      console.error("Raw response:", response.substring(0, 300) + "...");
-
-      // Try to extract any valid JSON data using regex as fallback
-      try {
-        const keyValuePairs = {};
-        const matches = response.match(/"([^"]+)":\s*"([^"]*?)"/g);
-        if (matches) {
-          matches.forEach((match) => {
-            const [, key, value] = match.match(/"([^"]+)":\s*"([^"]*)"/);
-            if (key && value) {
-              keyValuePairs[key] = value;
-            }
-          });
-          console.log("Recovered partial infobox data using regex");
-          return keyValuePairs;
-        }
-      } catch (regexError) {
-        console.error("Regex fallback also failed:", regexError);
-      }
-
-      return {};
+    // Validate that we have a proper JSON structure before parsing
+    if (!response.startsWith("{") || !response.endsWith("}")) {
+      throw new Error("Invalid JSON structure: missing braces");
     }
+
+    return JSON.parse(response);
   } catch (error) {
     console.error("Error generating infobox:", error);
-    return {};
+    throw error;
   }
 }
