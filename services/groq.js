@@ -1,7 +1,12 @@
 import { Groq } from "groq-sdk";
 import { marked } from "marked";
 import { titleToWikipediaSlug } from "../utils/slugs.js";
-import { storeImageContext } from "../utils/imageContext.js";
+import {
+  extractImageReferences,
+  markPromptsGenerating,
+  mergeInfoboxImageReferences,
+} from "../utils/imageContext.js";
+import { generateBatchImagePrompts } from "./replicate.js";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -142,18 +147,9 @@ function processMarkdownForWikiLinks(
       // Preserve the original extension from filename
       const extension = filename.split(".").pop() || "webp";
 
-      // Parse size and aspect ratio from LLM specification
-      const size = parseImageSize(sizeSpec);
+      // Force section images to medium size
+      const size = { width: 250, height: "auto", float: "right" };
       const aspectRatioSpec = parseAspectRatio(aspectRatio);
-
-      // Store context for this image
-      storeImageContext(
-        slug,
-        articleTitle,
-        sectionTitle,
-        caption,
-        markdownContent.substring(0, 500)
-      );
 
       const floatClass =
         size.float === "none" ? "wiki-figure-full" : "wiki-figure-float";
@@ -169,8 +165,8 @@ function processMarkdownForWikiLinks(
              alt="${caption}" 
              title="${caption}" 
              class="wiki-image lazy-load" 
-             width="${size.width}" 
-             style="height: ${size.height}; min-width: fit-content;">
+             width="250" 
+             style="height: auto;">
         <figcaption class="wiki-caption">${caption}</figcaption>
       </figure>`;
     }
@@ -186,8 +182,8 @@ function processMarkdownForWikiLinks(
       // Preserve the original extension from filename
       const extension = filename.split(".").pop() || "webp";
 
-      // Parse size from LLM specification, default aspect ratio
-      const size = parseImageSize(sizeSpec);
+      // Force section images to medium size
+      const size = { width: 250, height: "auto", float: "right" };
 
       const floatClass =
         size.float === "none" ? "wiki-figure-full" : "wiki-figure-float";
@@ -203,8 +199,8 @@ function processMarkdownForWikiLinks(
              alt="${caption}" 
              title="${caption}" 
              class="wiki-image" 
-             width="${size.width}" 
-             style="height: ${size.height}; max-width: 100%;">
+             width="250" 
+             style="height: auto;">
         <figcaption class="wiki-caption">${caption}</figcaption>
       </figure>`;
     }
@@ -221,7 +217,7 @@ function processMarkdownForWikiLinks(
       const extension = filename.split(".").pop() || "webp";
 
       // Use default medium size for legacy format
-      const size = parseImageSize("medium");
+      const size = { width: 250, height: "auto", float: "right" };
 
       const floatClass =
         size.float === "none" ? "wiki-figure-full" : "wiki-figure-float";
@@ -256,7 +252,7 @@ function processMarkdownForWikiLinks(
       const altText = nameWithoutExt.replace(/_/g, " ");
 
       // Use default medium size for images without size specification
-      const size = parseImageSize("medium");
+      const size = { width: 250, height: "auto", float: "right" };
 
       const floatStyle =
         size.float === "none"
@@ -609,7 +605,8 @@ async function generateSectionContent(topic, sectionTitle, sectionDescription) {
 Section: "${sectionTitle}"
 Section focus: ${sectionDescription}
 
-Write the content for this section. Remember to write 200-400 words of detailed, encyclopedic prose with extensive linking.`,
+Write the content for this section. Remember to write 200-400 words of detailed, encyclopedic prose with extensive linking.
+Use images sparingly—at most 2-3 per article, and only when they add significant value.`,
         },
       ],
       model: "llama-3.1-8b-instant",
@@ -684,7 +681,7 @@ export async function generatePageContent(topic) {
     // Process markdown to convert **bold** to wiki links
     markdownContent = processMarkdownForWikiLinks(
       markdownContent,
-      title,
+      topic,
       "Main Content"
     );
 
@@ -706,6 +703,50 @@ export async function generatePageContent(topic) {
     }
 
     console.log("Article generation completed successfully");
+
+    // Extract all image references and start background prompt generation
+    const allImageRefs = mergeInfoboxImageReferences(htmlContent, infoboxData);
+    // Always keep infobox image (if present) as the first image
+    let cappedImageRefs = allImageRefs;
+    if (allImageRefs.length > 3) {
+      // If infobox image is present, keep it and the next 2 unique images
+      const infoboxImg = allImageRefs.find((img) => img.type === "infobox");
+      if (infoboxImg) {
+        // Remove all other occurrences of the infobox image
+        const rest = allImageRefs.filter((img) => img.slug !== infoboxImg.slug);
+        cappedImageRefs = [infoboxImg, ...rest.slice(0, 2)];
+      } else {
+        cappedImageRefs = allImageRefs.slice(0, 3);
+      }
+    }
+    // Remove all but the capped images from htmlContent (main article only)
+    if (allImageRefs.length > cappedImageRefs.length) {
+      const slugsToKeep = new Set(cappedImageRefs.map((img) => img.slug));
+      htmlContent = htmlContent.replace(
+        /<figure[\s\S]*?<img[^>]+data-src="\/images\/([^".]+)\.[^">]+"[\s\S]*?<\/figure>/g,
+        (match, filename) => {
+          const slug = filename.replace(/\.[^/.]+$/, "");
+          // Only remove if not the infobox image
+          return slugsToKeep.has(slug) ? match : "";
+        }
+      );
+      htmlContent = htmlContent.replace(
+        /<img[^>]+(?:data-src|src)="\/images\/([^".]+)\.[^">]+"[^>]*>/g,
+        (match, filename) => {
+          const slug = filename.replace(/\.[^/.]+$/, "");
+          // Only remove if not the infobox image
+          return slugsToKeep.has(slug) ? match : "";
+        }
+      );
+    }
+    // Use cappedImageRefs for prompt generation
+    if (cappedImageRefs.length > 0) {
+      markPromptsGenerating(cappedImageRefs, topic);
+      generateBatchImagePrompts(cappedImageRefs, topic).catch((error) => {
+        console.error("Background batch prompt generation failed:", error);
+      });
+    }
+
     return {
       content: htmlContent,
       linkedPages: linkedPages,

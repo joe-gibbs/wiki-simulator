@@ -18,10 +18,7 @@ import {
 } from "./services/groq.js";
 import { generateWikiImage } from "./services/replicate.js";
 import { wikipediaSlugToTitle, titleToWikipediaSlug } from "./utils/slugs.js";
-import {
-  getImageContext,
-  buildImageGenerationContext,
-} from "./utils/imageContext.js";
+import { getImagePrompt, isImagePromptReady } from "./utils/imageContext.js";
 import {
   isValidPage,
   addValidPage,
@@ -97,20 +94,40 @@ app.get("/images/:filename.:ext", async (req, res) => {
 
     // Convert filename to a readable title for image generation
     const title = wikipediaSlugToTitle(filename);
-
-    // Get stored context for this image
-    const contextData = getImageContext(filename);
-    const enhancedContext = buildImageGenerationContext(filename, contextData);
-
     console.log(`🖼️ Image request: ${filename} -> "${title}"`);
+
+    // Check if prompt is ready
+    const promptData = getImagePrompt(filename);
+
+    if (!promptData) {
+      console.log(`❌ No prompt data found for image: ${filename}`);
+      return res.status(404).send("Image not found - no prompt data available");
+    }
+
+    if (!promptData.ready) {
+      console.log(
+        `⏳ Prompt still generating for image: ${filename}, polling...`
+      );
+
+      // Return a loading response that will trigger client-side polling
+      return res.status(202).json({
+        message: "Image prompt still generating, please try again in a moment",
+        status: "generating",
+        filename: filename,
+      });
+    }
+
+    console.log(
+      `✅ Using ready prompt for ${filename}: "${promptData.prompt}"`
+    );
 
     // Extract aspect ratio from URL if provided, default to 4:3
     const aspectRatio = req.query.aspect || "4:3";
 
-    // Generate image using Replicate with enhanced context
+    // Generate image using the pre-generated prompt
     const imageBuffer = await generateWikiImage(
       title,
-      enhancedContext,
+      promptData.prompt,
       aspectRatio
     );
 

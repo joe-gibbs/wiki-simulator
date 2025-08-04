@@ -140,7 +140,7 @@ export function renderInfobox(title, infoboxData) {
 
     infoboxHtml += `
       <div class="infobox-image">
-        <img src="/images/${slug}.${extension}" alt="${title}" title="${title}">
+        <img data-src="/images/${slug}.${extension}" alt="${title}" title="${title}" class="wiki-image lazy-load">
       </div>`;
   }
 

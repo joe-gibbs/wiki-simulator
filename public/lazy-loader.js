@@ -43,6 +43,35 @@ class LazyImageLoader {
     const src = img.dataset.src;
     if (!src) return;
 
+    // First, check if the image prompt is ready by making a HEAD request
+    this.checkImageStatus(img, src);
+  }
+
+  async checkImageStatus(img, src) {
+    try {
+      const response = await fetch(src, { method: "HEAD" });
+
+      if (response.status === 202) {
+        // Prompt still generating, poll again silently
+        setTimeout(() => this.checkImageStatus(img, src), 1000); // Poll every second
+        return;
+      }
+
+      if (response.ok) {
+        // Image is ready, load it normally
+        this.loadImageNormally(img, src);
+      } else {
+        // Error loading image
+        this.handleImageError(img);
+      }
+    } catch (error) {
+      console.error("Error checking image status:", error);
+      // Fallback: try to load the image normally
+      this.loadImageNormally(img, src);
+    }
+  }
+
+  loadImageNormally(img, src) {
     // Create a new image to preload
     const imageLoader = new Image();
 
@@ -59,14 +88,18 @@ class LazyImageLoader {
     };
 
     imageLoader.onerror = () => {
-      // Image failed to load - just hide it
-      img.style.display = "none";
-      img.classList.remove("lazy-load");
-      img.classList.add("error");
+      this.handleImageError(img);
     };
 
     // Start loading
     imageLoader.src = src;
+  }
+
+  handleImageError(img) {
+    // Image failed to load - just hide it
+    img.style.display = "none";
+    img.classList.remove("lazy-load");
+    img.classList.add("error");
   }
 
   loadAllImages() {
@@ -81,7 +114,7 @@ class LazyImageLoader {
   observeNewImages() {
     if (this.imageObserver) {
       const newLazyImages = document.querySelectorAll(
-        ".lazy-load:not(.loading):not(.loaded)"
+        ".lazy-load:not(.loaded)"
       );
       newLazyImages.forEach((img) => {
         this.imageObserver.observe(img);

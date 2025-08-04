@@ -480,6 +480,14 @@ body {
   display: none;
 }
 
+.wiki-image.loading {
+  /* No visual feedback */
+}
+
+.wiki-image.generating {
+  /* No visual feedback */
+}
+
 /* Wiki Figure with Caption */
 .wiki-figure {
   display: block;
@@ -500,17 +508,12 @@ body {
   max-width: 100%;
 }
 
-.wiki-figure img {
-  display: block;
+.wiki-figure img,
+.wiki-image:not(.infobox-image img) {
+  max-width: 250px !important;
+  width: 250px !important;
   height: auto;
-  /* Ensure image is at least as wide as its caption */
-  min-width: 100%;
-}
-
-.wiki-figure-float img {
-  /* Let the image use its specified width attribute but grow if caption is wider */
-  max-width: 100%;
-  min-width: 100%;
+  min-width: auto !important;
 }
 
 .wiki-caption {
@@ -600,4 +603,12 @@ body {
     flex-direction: column;
     align-items: center;
   }
+}
+
+.wiki-figure {
+  clear: both;
+}
+
+.article-section {
+  clear: both;
 }

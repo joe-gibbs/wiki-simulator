@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { promisify } from "util";
 import { Groq } from "groq-sdk";
 import dotenv from "dotenv";
+import { storeImagePrompt } from "../utils/imageContext.js";
 
 dotenv.config();
 
@@ -15,29 +16,19 @@ const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
-// System prompt for generating image prompts
-const IMAGE_PROMPT_SYSTEM = `You are an expert at creating prompts for AI image generation that will produce Wikipedia-style educational images.
+// System prompt for generating image prompts (simplified for speed)
+const IMAGE_PROMPT_SYSTEM = `Generate a concise prompt for a Wikipedia-style educational image.
 
-Generate a detailed, specific prompt for creating a high-quality educational image suitable for a Wikipedia article. The image should be:
-- Documentary/encyclopedic photography style like Wikipedia Commons
-- Professional, neutral, and educational tone
-- Clear, well-lit with natural lighting
-- Sharp focus with good detail
-- Appropriate for academic/reference use
-- No dramatic angles or artistic effects
-- Clean, uncluttered composition
-- Realistic proportions and colors
-- Standard landscape (4:3) or portrait orientation as appropriate
+Style: Documentary photography, professional, neutral, well-lit, clean background, encyclopedia quality.
 
-For portraits: Professional headshot style, neutral expression, clean background
-For buildings: Straight-on architectural documentation, clear details
-For objects: Clean product photography style on neutral background
-For landscapes: Clear geographical documentation
-For diagrams: Clean technical illustration style
+Return only the image prompt in 1-2 sentences.`;
 
-Historical images should be in black and white, or painted, depending on the year.
+// System prompt for batch generating multiple image prompts
+const BATCH_IMAGE_PROMPT_SYSTEM = `Generate concise prompts for Wikipedia-style educational images. 
 
-Return ONLY the image generation prompt, nothing else.`;
+For each image, return ONLY the prompt (max 100 characters), one per line, in the same order as the input.
+
+Style: Documentary photography, professional, neutral, well-lit, clean background, encyclopedia quality.`;
 
 /**
  * Generate an AI image prompt using Groq's Llama model
@@ -56,14 +47,14 @@ async function generateImagePrompt(subject, context = "") {
         {
           role: "user",
           content: `Subject: "${subject}"${
-            context ? `\nContext: ${context}` : ""
-          }\n\nGenerate a detailed image prompt for this Wikipedia article topic.`,
+            context ? `\nContext: ${context.substring(0, 200)}` : ""
+          }`,
         },
       ],
       model: "llama-3.1-8b-instant",
-      temperature: 0.7,
-      max_completion_tokens: 300,
-      top_p: 0.9,
+      temperature: 0.3,
+      max_completion_tokens: 150,
+      top_p: 0.8,
       stream: false,
     });
 
@@ -82,7 +73,161 @@ async function generateImagePrompt(subject, context = "") {
 }
 
 /**
- * Generate a Wikipedia-style educational image using Replicate's FLUX model
+ * Generate multiple image prompts in a single batch call
+ * @param {Array} imageReferences - Array of image objects with caption/alt text
+ * @param {string} articleTitle - The article title for context
+ * @returns {Promise<Array>} - Array of generated prompts
+ */
+export async function generateBatchImagePrompts(imageReferences, articleTitle) {
+  if (!imageReferences || imageReferences.length === 0) {
+    return [];
+  }
+
+  try {
+    console.log(
+      `🎨 Generating ${imageReferences.length} image prompts for article: ${articleTitle}`
+    );
+
+    // Build the batch request
+    const imageList = imageReferences
+      .map(
+        (img, index) =>
+          `${index + 1}. ${
+            img.caption || img.alt || img.slug.replace(/_/g, " ")
+          }`
+      )
+      .join("\n");
+
+    const userPrompt = `Article: "${articleTitle}"
+
+Images to generate prompts for:
+${imageList}
+
+Generate a concise prompt (max 100 chars) for each image:`;
+
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: BATCH_IMAGE_PROMPT_SYSTEM,
+        },
+        {
+          role: "user",
+          content: userPrompt,
+        },
+      ],
+      model: "llama-3.1-8b-instant",
+      temperature: 0.3,
+      max_completion_tokens: 500,
+      top_p: 0.8,
+      stream: false,
+    });
+
+    const response = chatCompletion.choices[0]?.message?.content?.trim() || "";
+    if (!response) {
+      throw new Error("Failed to generate batch image prompts");
+    }
+
+    // Parse the response - split by lines and clean up
+    const prompts = response
+      .split("\n")
+      .map((line) => line.replace(/^\d+\.\s*/, "").trim()) // Remove "1. " prefixes
+      .filter((line) => line.length > 0)
+      .slice(0, imageReferences.length); // Ensure we don't get more than requested
+
+    console.log(`✅ Generated ${prompts.length} prompts successfully`);
+
+    // Store each prompt with its corresponding image
+    imageReferences.forEach((img, index) => {
+      if (prompts[index]) {
+        storeImagePrompt(img.slug, prompts[index], articleTitle);
+      }
+    });
+
+    return prompts;
+  } catch (error) {
+    console.error("Error generating batch image prompts:", error);
+
+    // Fallback: generate basic prompts for each image
+    const fallbackPrompts = imageReferences.map((img) => {
+      const prompt = `Educational photo of ${
+        img.caption || img.alt || img.slug.replace(/_/g, " ")
+      }, documentary style`;
+      storeImagePrompt(img.slug, prompt, articleTitle);
+      return prompt;
+    });
+
+    return fallbackPrompts;
+  }
+}
+
+/**
+ * Generate a Wikipedia-style educational image using a pre-generated prompt
+ * @param {string} subject - The subject to generate an image for
+ * @param {string} prompt - Pre-generated image prompt
+ * @param {string} aspectRatio - Aspect ratio for the image
+ * @returns {Promise<Buffer>} - Image buffer
+ */
+export async function generateWikiImage(subject, prompt, aspectRatio = "4:3") {
+  const startTime = Date.now();
+  console.log(
+    `🎨 Starting image generation for: "${subject}" (${aspectRatio})`
+  );
+  console.log(
+    `📋 Using pre-generated prompt: "${prompt.substring(0, 100)}..."`
+  );
+
+  const input = {
+    prompt: prompt,
+    go_fast: true,
+    megapixels: "0.25",
+    num_outputs: 1,
+    aspect_ratio: aspectRatio,
+    output_format: "webp",
+    output_quality: 60,
+    num_inference_steps: 1,
+  };
+
+  try {
+    // Call Replicate API
+    const replicateStartTime = Date.now();
+    console.log(`🚀 Calling Replicate API...`);
+
+    const output = await replicate.run("black-forest-labs/flux-schnell", {
+      input,
+    });
+
+    const replicateDuration = Date.now() - replicateStartTime;
+    console.log(`🎯 Replicate API completed in ${replicateDuration}ms`);
+
+    if (!output || !output[0]) {
+      throw new Error("No image generated from Replicate");
+    }
+
+    // Download the image from the URL
+    const downloadStartTime = Date.now();
+    console.log(`⬇️ Downloading image from Replicate...`);
+
+    const imageBuffer = await downloadImage(output[0]);
+
+    const downloadDuration = Date.now() - downloadStartTime;
+    const totalDuration = Date.now() - startTime;
+
+    console.log(`📥 Image download completed in ${downloadDuration}ms`);
+    console.log(
+      `✅ Total image generation time: ${totalDuration}ms (API: ${replicateDuration}ms, Download: ${downloadDuration}ms)`
+    );
+    console.log(`📊 Image size: ${(imageBuffer.length / 1024).toFixed(1)}KB`);
+
+    return imageBuffer;
+  } catch (error) {
+    console.error("Error generating image:", error);
+    throw error;
+  }
+}
+
+/**
+ * Generate a Wikipedia-style educational image using Replicate's FLUX model (legacy function)
  * @param {string} subject - The subject to generate an image for
  * @param {string} context - Additional context about the subject
  * @param {string} aspectRatio - Aspect ratio for the image
@@ -201,19 +346,4 @@ async function downloadImage(urlOrFileObject) {
     console.error("Error downloading image:", error);
     throw error;
   }
-}
-
-/**
- * Generate image based on wiki page title and context
- * @param {string} pageTitle - The wiki page title
- * @param {string} context - Additional context about what kind of image is needed
- * @param {string} aspectRatio - Aspect ratio for the image (default "4:3")
- * @returns {Promise<Buffer>} - Image buffer
- */
-export async function generateWikiImage(
-  pageTitle,
-  context = "",
-  aspectRatio = "4:3"
-) {
-  return await generateImage(pageTitle, context, aspectRatio);
 }
