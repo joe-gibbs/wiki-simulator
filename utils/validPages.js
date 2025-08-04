@@ -84,26 +84,4 @@ export function addSuggestionsToValid(suggestions) {
 // Initialize cache on startup
 loadValidPages();
 
-// Add some common pages if cache is empty
-if (validPages.size === 0) {
-  const commonPages = [
-    "Main Page",
-    "Wikipedia",
-    "United States",
-    "World War II",
-    "COVID-19",
-    "Europe",
-    "History",
-    "Science",
-  ];
-
-  commonPages.forEach((title) => {
-    const slug = titleToWikipediaSlug(title);
-    validPages.add(slug);
-  });
-
-  console.log(`Initialized with ${validPages.size} common pages`);
-  saveValidPages();
-}
-
 console.log(`Valid pages cache ready with ${validPages.size} pages`);

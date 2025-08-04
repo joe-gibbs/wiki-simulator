@@ -18,7 +18,7 @@ import {
 } from "./services/groq.js";
 import { generateWikiImage } from "./services/replicate.js";
 import { wikipediaSlugToTitle, titleToWikipediaSlug } from "./utils/slugs.js";
-import { getImagePrompt, isImagePromptReady } from "./utils/imageContext.js";
+import { getImagePrompt } from "./utils/imageContext.js";
 import {
   isValidPage,
   addValidPage,
@@ -37,6 +37,52 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Rate limiting store for non-cached page generation
+const rateLimitStore = new Map();
+
+// Rate limiting helper function for non-cached content generation
+const checkRateLimit = (req, res) => {
+  const clientIp =
+    req.ip || req.connection.remoteAddress || req.socket.remoteAddress;
+  const now = Date.now();
+  const oneHour = 60 * 60 * 1000; // 1 hour in milliseconds
+  const maxRequests = 20;
+
+  // Clean up old entries
+  for (const [ip, data] of rateLimitStore.entries()) {
+    data.requests = data.requests.filter(
+      (timestamp) => now - timestamp < oneHour
+    );
+    if (data.requests.length === 0) {
+      rateLimitStore.delete(ip);
+    }
+  }
+
+  // Get or create entry for this IP
+  if (!rateLimitStore.has(clientIp)) {
+    rateLimitStore.set(clientIp, { requests: [] });
+  }
+
+  const ipData = rateLimitStore.get(clientIp);
+
+  // Check if over limit
+  if (ipData.requests.length >= maxRequests) {
+    console.log(
+      `Rate limit exceeded for IP: ${clientIp} (${ipData.requests.length} non-cached requests in last hour)`
+    );
+    res.status(429).json({
+      error: "Rate limit exceeded",
+      message: "Maximum 20 non-cached page generations per hour allowed",
+      retryAfter: Math.ceil((ipData.requests[0] + oneHour - now) / 1000),
+    });
+    return false; // Rate limit exceeded
+  }
+
+  // Add current request to the count
+  ipData.requests.push(now);
+  return true; // Request allowed
+};
+
 // Middleware
 app.use(
   helmet({
@@ -53,6 +99,10 @@ app.use(
 );
 app.use(cors());
 app.use(express.json());
+
+// Trust proxy to get real IP addresses
+app.set("trust proxy", true);
+
 app.use(express.static("public"));
 
 // Route for images - matches any image file extension
@@ -197,6 +247,11 @@ app.get("/wiki/:page", async (req, res) => {
       }
     }
 
+    // Check rate limit for non-cached content generation
+    if (!checkRateLimit(req, res)) {
+      return; // Rate limit response already sent
+    }
+
     // Check if page is in valid cache
     if (!isValidPage(decodedPage)) {
       console.log(`Validating new page: ${decodedPage}`);
@@ -211,7 +266,7 @@ app.get("/wiki/:page", async (req, res) => {
         console.log(`Content rejected as inappropriate: ${candidateTitle}`);
         return res.status(404).send(
           renderTemplate("page", {
-            TITLE: "Page Not Found - Wiki",
+            TITLE: "Page Not Found - Wiki Simulator",
             INFOBOX: "",
             CONTENT: `<div style="text-align: center; padding: 60px;">
             <h1>404 - Page Not Found</h1>
@@ -285,7 +340,7 @@ app.get("/wiki/:page", async (req, res) => {
 
     // Now send the complete page
     const completePage = renderTemplate("page", {
-      TITLE: `${title} - Wiki`,
+      TITLE: `${title} - Wiki Simulator`,
       INFOBOX: infoboxHtml,
       CONTENT: content,
     });
@@ -307,7 +362,7 @@ app.get("/wiki/:page", async (req, res) => {
     // If we haven't sent headers yet, send error page normally
     if (!res.headersSent) {
       const errorPage = renderTemplate("page", {
-        TITLE: "Error - Wiki",
+        TITLE: "Error - Wiki Simulator",
         INFOBOX: "",
         CONTENT:
           '<h2>Error</h2><p>Sorry, there was an error generating this page.</p><p><a href="/">Back to Home</a></p>',
@@ -317,7 +372,7 @@ app.get("/wiki/:page", async (req, res) => {
 
     // If headers are already sent, send error page without DOCTYPE
     const errorPage = renderTemplate("page", {
-      TITLE: "Error - Wiki",
+      TITLE: "Error - Wiki Simulator",
       INFOBOX: "",
       CONTENT:
         '<h2>Error</h2><p>Sorry, there was an error generating this page.</p><p><a href="/">Back to Home</a></p>',
@@ -331,7 +386,7 @@ app.get("/wiki/:page", async (req, res) => {
 // Home page route
 app.get("/", (req, res) => {
   const homePage = renderTemplate("home", {
-    TITLE: "Wiki - The Free Encyclopedia",
+    TITLE: "Wiki Simulator - The Fake Encyclopedia",
   });
   res.send(homePage);
 });

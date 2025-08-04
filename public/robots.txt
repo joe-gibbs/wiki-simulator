@@ -1,0 +1,10 @@
+User-agent: *
+Disallow: /wiki/
+
+# Allow access to other directories
+Allow: /
+Allow: /api/
+Allow: /images/
+
+# Crawl-delay to be respectful to legitimate crawlers
+Crawl-delay: 1
