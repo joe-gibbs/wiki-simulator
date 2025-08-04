@@ -1,0 +1,89 @@
+<div class="home-container">
+  <h1 class="home-title">Wiki</h1>
+  <p class="home-subtitle">The free encyclopedia that anyone can read</p>
+
+  <div class="home-search">
+    <div class="search-container">
+      <input
+        type="text"
+        class="search-input"
+        placeholder="Search Wikipedia..."
+        id="homeSearchInput"
+      />
+      <div class="search-suggestions" id="homeSuggestions"></div>
+    </div>
+  </div>
+
+  <div class="example-topics">
+    <h3>Featured topics</h3>
+    <div class="topic-links">
+      <a href="/wiki/Artificial_Intelligence" class="topic-link"
+        >Artificial Intelligence</a
+      >
+      <a href="/wiki/Quantum_Computing" class="topic-link">Quantum Computing</a>
+      <a href="/wiki/Climate_Change" class="topic-link">Climate Change</a>
+      <a href="/wiki/Space_Exploration" class="topic-link">Space Exploration</a>
+      <a href="/wiki/Renewable_Energy" class="topic-link">Renewable Energy</a>
+      <a href="/wiki/Machine_Learning" class="topic-link">Machine Learning</a>
+      <a href="/wiki/Biotechnology" class="topic-link">Biotechnology</a>
+      <a href="/wiki/Blockchain" class="topic-link">Blockchain</a>
+    </div>
+  </div>
+</div>
+
+<script>
+  const homeSearchInput = document.getElementById("homeSearchInput");
+  const homeSuggestions = document.getElementById("homeSuggestions");
+  let homeTimeoutId;
+
+  homeSearchInput.addEventListener("input", function () {
+    clearTimeout(homeTimeoutId);
+    const query = this.value.trim();
+
+    if (query.length < 2) {
+      homeSuggestions.style.display = "none";
+      return;
+    }
+
+    homeTimeoutId = setTimeout(() => {
+      fetch(`/api/search?q=${encodeURIComponent(query)}`)
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.length > 0) {
+            homeSuggestions.innerHTML = data
+              .map(
+                (item) =>
+                  `<div class="suggestion-item" onclick="location.href='/wiki/${item.slug}'">${item.title}</div>`
+              )
+              .join("");
+            homeSuggestions.style.display = "block";
+          } else {
+            homeSuggestions.style.display = "none";
+          }
+        })
+        .catch(() => {
+          homeSuggestions.style.display = "none";
+        });
+    }, 300);
+  });
+
+  homeSearchInput.addEventListener("keypress", function (e) {
+    if (e.key === "Enter") {
+      const query = this.value.trim();
+      if (query) {
+        const slug = query.replace(/\\s+/g, "_").replace(/[^\\w_]/g, "");
+        location.href = "/wiki/" + slug;
+      }
+    }
+  });
+
+  // Hide suggestions when clicking outside
+  document.addEventListener("click", function (e) {
+    if (
+      !homeSearchInput.contains(e.target) &&
+      !homeSuggestions.contains(e.target)
+    ) {
+      homeSuggestions.style.display = "none";
+    }
+  });
+</script>

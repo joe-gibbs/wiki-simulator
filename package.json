@@ -1,19 +1,31 @@
 {
-  "name": "llm-gui",
-  "private": true,
-  "version": "0.0.0",
+  "name": "llm-gui-wiki",
+  "version": "1.0.0",
+  "description": "Node.js application for generating Wikipedia-type pages with Groq",
+  "main": "server.js",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "start": "node server.js",
+    "dev": "node --watch server.js"
   },
   "dependencies": {
-    "preact": "^10.26.9"
+    "express": "^4.18.2",
+    "groq-sdk": "^0.3.0",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "dotenv": "^16.3.1",
+    "marked": "^9.1.6"
   },
-  "devDependencies": {
-    "@preact/preset-vite": "^2.10.2",
-    "typescript": "~5.8.3",
-    "vite": "^7.0.4"
-  }
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "groq",
+    "wikipedia",
+    "llm",
+    "node",
+    "express"
+  ],
+  "author": "",
+  "license": "MIT"
 }
